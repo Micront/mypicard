@@ -42,9 +42,9 @@ import picard.cmdline.Option;
 import picard.cmdline.StandardOptionDefinitions;
 
 import java.io.File;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
@@ -135,33 +135,34 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
 
         ExecutorService service = Executors.newCachedThreadPool();
 
-        List<SAMRecord> pairs = new ArrayList<SAMRecord>(MAX_PAIRS);
+        List<SAMRecord> pairs = new LinkedList<SAMRecord>();
 //
         for (final SAMRecord rec : in) {
-            final ReferenceSequence ref;
-            if (walker == null || rec.getReferenceIndex() == SAMRecord.NO_ALIGNMENT_REFERENCE_INDEX) {
-                ref = null;
-            } else {
-                ref = walker.get(rec.getReferenceIndex());
-            }
-
-            for (final SinglePassSamProgram program : programs) {
-                program.acceptRead(rec, ref);
-            }
 
             pairs.add(rec);
 
-            if (pairs.size() <= MAX_PAIRS) {
+            if (pairs.size() < MAX_PAIRS) {
                 continue;
             }
 
             final List<SAMRecord> tmpPairs = pairs;
-            pairs = new ArrayList<SAMRecord>(MAX_PAIRS);
+            pairs = new LinkedList<SAMRecord>();
 
             service.submit(new Callable<Boolean>() {
                 @Override
                 public Boolean call() throws Exception {
+
                     for (SAMRecord rec : tmpPairs) {
+                        final ReferenceSequence ref;
+                        if (walker == null || rec.getReferenceIndex() == SAMRecord.NO_ALIGNMENT_REFERENCE_INDEX) {
+                            ref = null;
+                        } else {
+                            ref = walker.get(rec.getReferenceIndex());
+                        }
+
+                        for (final SinglePassSamProgram program : programs) {
+                            program.acceptRead(rec, ref);
+                        }
                         progress.record(rec);
                     }
                     return null;
