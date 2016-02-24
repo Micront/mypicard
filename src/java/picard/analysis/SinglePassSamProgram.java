@@ -61,7 +61,8 @@ import java.util.concurrent.TimeUnit;
  * @author Tim Fennell
  */
 public abstract class SinglePassSamProgram extends CommandLineProgram {
-    private static final int MAX_SEM = 8;
+
+
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "Input SAM or BAM file.")
     public File INPUT;
 
@@ -89,6 +90,7 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
 
     public static final int MAX_PAIRS = 1000;
     private static final int QUEUE_CAPACITY = 2;
+    private static final int MAX_SEM = 50;
 
     public static void makeItSo(final File input,
                                 final File referenceSequence,
