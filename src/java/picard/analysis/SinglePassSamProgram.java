@@ -42,11 +42,15 @@ import picard.cmdline.Option;
 import picard.cmdline.StandardOptionDefinitions;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.concurrent.Callable;
+import java.util.List;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -57,6 +61,7 @@ import java.util.concurrent.TimeUnit;
  * @author Tim Fennell
  */
 public abstract class SinglePassSamProgram extends CommandLineProgram {
+    private static final int MAX_SEM = 8;
     @Option(shortName = StandardOptionDefinitions.INPUT_SHORT_NAME, doc = "Input SAM or BAM file.")
     public File INPUT;
 
@@ -81,6 +86,9 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
         makeItSo(INPUT, REFERENCE_SEQUENCE, ASSUME_SORTED, STOP_AFTER, Arrays.asList(this));
         return 0;
     }
+
+    public static final int MAX_PAIRS = 1000;
+    private static final int QUEUE_CAPACITY = 2;
 
     public static void makeItSo(final File input,
                                 final File referenceSequence,
@@ -130,8 +138,45 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
 
         final ProgressLogger progress = new ProgressLogger(log);
 
-        ExecutorService service = Executors.newCachedThreadPool();
+        final ExecutorService service = Executors.newCachedThreadPool();
+
+        final BlockingQueue<List<Object[]>> queue = new LinkedBlockingQueue<List<Object[]>>(
+                QUEUE_CAPACITY);
+
+        final Semaphore sem = new Semaphore(MAX_SEM);
+
+        List<Object[]> pairs = new ArrayList<Object[]>(MAX_PAIRS);
 //
+        service.execute(new Runnable() {
+
+            @Override
+            public void run() {
+                while (true) {
+
+                    try {
+                        final List<Object[]> tmpPairs = queue.take();
+
+                        sem.acquire();
+
+                        service.submit(new Runnable() {
+
+                            @Override
+                            public void run() {
+                                for (Object[] object : tmpPairs) {
+                                    progress.record((SAMRecord) object[0]);
+                                }
+                                sem.release();
+                            }
+                        });
+
+                    } catch (InterruptedException e1) {
+                        e1.printStackTrace();
+                    }
+                }
+            }
+        });
+
+
         for (final SAMRecord rec : in) {
             final ReferenceSequence ref;
             if (walker == null || rec.getReferenceIndex() == SAMRecord.NO_ALIGNMENT_REFERENCE_INDEX) {
@@ -143,13 +188,33 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
             for (final SinglePassSamProgram program : programs) {
                 program.acceptRead(rec, ref);
             }
-            service.submit(new Callable<Boolean>() {
-                @Override
-                public Boolean call() throws Exception {
-                    progress.record(rec);
-                    return null;
-                }
-            });
+
+            pairs.add(new Object[]{rec});
+
+            if (pairs.size() < MAX_PAIRS) {
+                continue;
+            }
+
+            try {
+                queue.put(pairs);
+            } catch (InterruptedException e1) {
+                e1.printStackTrace();
+            }
+
+            pairs = new ArrayList<Object[]>(MAX_PAIRS);
+
+//            final List<Object[]> tmpPairs = pairs;
+//            pairs = new ArrayList<Object[]>(MAX_PAIRS);
+//
+//            service.submit(new Callable<Boolean>() {
+//                @Override
+//                public Boolean call() throws Exception {
+//                    for (Object[] object : tmpPairs) {
+//                        progress.record((SAMRecord) object[0]);
+//                    }
+//                    return null;
+//                }
+//            });
 
 
             // See if we need to terminate early?
@@ -162,9 +227,11 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
                 break;
             }
         }
+
         service.shutdown();
+
         try {
-            service.awaitTermination(1,TimeUnit.DAYS);
+            service.awaitTermination(1, TimeUnit.DAYS);
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
