@@ -41,8 +41,6 @@ import htsjdk.variant.variantcontext.writer.Options;
 import htsjdk.variant.variantcontext.writer.VariantContextWriterBuilder;
 
 import java.io.File;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Field;
 import java.net.InetAddress;
 import java.text.DecimalFormat;
 import java.util.ArrayList;

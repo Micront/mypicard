@@ -44,6 +44,10 @@ import picard.cmdline.StandardOptionDefinitions;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Super class that is designed to provide some consistent structure between subclasses that
@@ -126,6 +130,8 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
 
         final ProgressLogger progress = new ProgressLogger(log);
 
+        ExecutorService service = Executors.newCachedThreadPool();
+//
         for (final SAMRecord rec : in) {
             final ReferenceSequence ref;
             if (walker == null || rec.getReferenceIndex() == SAMRecord.NO_ALIGNMENT_REFERENCE_INDEX) {
@@ -137,8 +143,14 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
             for (final SinglePassSamProgram program : programs) {
                 program.acceptRead(rec, ref);
             }
+            service.submit(new Callable<Boolean>() {
+                @Override
+                public Boolean call() throws Exception {
+                    progress.record(rec);
+                    return null;
+                }
+            });
 
-            progress.record(rec);
 
             // See if we need to terminate early?
             if (stopAfter > 0 && progress.getCount() >= stopAfter) {
@@ -149,6 +161,12 @@ public abstract class SinglePassSamProgram extends CommandLineProgram {
             if (!anyUseNoRefReads && rec.getReferenceIndex() == SAMRecord.NO_ALIGNMENT_REFERENCE_INDEX) {
                 break;
             }
+        }
+        service.shutdown();
+        try {
+            service.awaitTermination(1,TimeUnit.DAYS);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
 
         CloserUtil.close(in);
